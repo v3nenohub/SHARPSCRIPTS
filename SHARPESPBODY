@@ -1,0 +1,216 @@
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local workspaceCharacters = Workspace:WaitForChild("Characters")
+
+local activeHighlights = {}
+local characterConnections = {}
+local isCleaning = false
+
+local function cleanAll()
+    if isCleaning then return end
+    isCleaning = true
+    
+    for character, highlight in pairs(activeHighlights) do
+        if highlight and highlight.Parent then
+            highlight:Destroy()
+        end
+        if characterConnections[character] then
+            for _, conn in pairs(characterConnections[character]) do
+                pcall(function() conn:Disconnect() end)
+            end
+        end
+    end
+    
+    table.clear(activeHighlights)
+    table.clear(characterConnections)
+    
+    isCleaning = false
+end
+
+local function createHighlight()
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "V3ENO_Body"
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 1
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    return highlight
+end
+
+local function getTeamColor(targetPlayer)
+    if not targetPlayer or targetPlayer == LocalPlayer then return nil end
+    
+    local localTeam = LocalPlayer.Team
+    local targetTeam = targetPlayer.Team
+    
+    if not localTeam or not targetTeam then
+        return Color3.fromRGB(255, 255, 0)
+    end
+    
+    if localTeam == targetTeam then
+        return Color3.fromRGB(0, 150, 255)
+    else
+        return Color3.fromRGB(255, 0, 0)
+    end
+end
+
+local function removeCharacter(character)
+    if not character then return end
+    
+    if activeHighlights[character] then
+        activeHighlights[character]:Destroy()
+        activeHighlights[character] = nil
+    end
+    
+    if characterConnections[character] then
+        for _, conn in pairs(characterConnections[character]) do
+            pcall(function() conn:Disconnect() end)
+        end
+        characterConnections[character] = nil
+    end
+end
+
+local function isValidCharacter(character)
+    if not character or not character:IsA("Model") then return false end
+    if not character.Parent or character.Parent ~= workspaceCharacters then return false end
+    
+    local player = Players:GetPlayerFromCharacter(character)
+    if not player then return false end
+    if player == LocalPlayer then return false end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+    
+    return true
+end
+
+local function setupCharacter(character)
+    if not isValidCharacter(character) then return end
+    
+    removeCharacter(character)
+    
+    local highlight = createHighlight()
+    highlight.Adornee = character
+    highlight.Parent = character
+    activeHighlights[character] = highlight
+    
+    local player = Players:GetPlayerFromCharacter(character)
+    local connections = {}
+    
+    local function updateColor()
+        if not highlight or highlight.Parent ~= character then return end
+        
+        local currentPlayer = Players:GetPlayerFromCharacter(character)
+        local color = getTeamColor(currentPlayer)
+        if color then
+            highlight.FillColor = color
+        else
+            removeCharacter(character)
+        end
+    end
+    
+    if player then
+        table.insert(connections, player:GetPropertyChangedSignal("Team"):Connect(updateColor))
+        table.insert(connections, LocalPlayer:GetPropertyChangedSignal("Team"):Connect(updateColor))
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        table.insert(connections, humanoid.Died:Connect(function()
+            removeCharacter(character)
+        end))
+        table.insert(connections, humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+            if humanoid.Health <= 0 then
+                removeCharacter(character)
+            end
+        end))
+    end
+    
+    table.insert(connections, character.AncestryChanged:Connect(function()
+        if not character or not character.Parent or character.Parent ~= workspaceCharacters then
+            removeCharacter(character)
+        end
+    end))
+    
+    characterConnections[character] = connections
+    updateColor()
+end
+
+workspaceCharacters.ChildAdded:Connect(function(child)
+    task.wait(0.5)
+    setupCharacter(child)
+end)
+
+workspaceCharacters.ChildRemoved:Connect(function(child)
+    removeCharacter(child)
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    cleanAll()
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            setupCharacter(player.Character)
+        end
+    end
+end)
+
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    for character, highlight in pairs(activeHighlights) do
+        if character and highlight and highlight.Parent then
+            local player = Players:GetPlayerFromCharacter(character)
+            local color = getTeamColor(player)
+            if color then
+                highlight.FillColor = color
+            end
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    for character, highlight in pairs(activeHighlights) do
+        if not isValidCharacter(character) then
+            removeCharacter(character)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(5)
+        cleanAll()
+        
+        for _, char in pairs(workspaceCharacters:GetChildren()) do
+            if isValidCharacter(char) then
+                setupCharacter(char)
+            end
+        end
+    end
+end)
+
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer and player.Character then
+        task.spawn(setupCharacter, player.Character)
+    end
+    player.CharacterAdded:Connect(function(character)
+        task.wait(1)
+        setupCharacter(character)
+    end)
+end
+
+SWITCH GUN / KNIFE:
+
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+        task.wait()
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+    end
+end)

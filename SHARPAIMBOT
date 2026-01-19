@@ -1,0 +1,56 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local CharactersFolder = workspace:WaitForChild("Characters")
+
+local SMOOTHING = 0.2 -- Ajustado para grudar mais rápido
+
+local function GetBestTarget()
+    local closestTarget = nil
+    local shortestDistance = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, char in pairs(CharactersFolder:GetChildren()) do
+        -- Foca em qualquer coisa na pasta que não seja o LocalPlayer
+        if char ~= LocalPlayer.Character and char:FindFirstChild("Head") then
+            local p = Players:GetPlayerFromCharacter(char)
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            
+            -- Se for inimigo e estiver vivo, ele vira alvo na hora
+            if p and p.Team ~= LocalPlayer.Team and hum and hum.Health > 0 then
+                local pos, onScreen = Camera:WorldToViewportPoint(char.Head.Position)
+                
+                if onScreen then
+                    local screenDist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                    if screenDist < shortestDistance then
+                        shortestDistance = screenDist
+                        closestTarget = char
+                    end
+                end
+            end
+        end
+    end
+    return closestTarget
+end
+
+RunService.RenderStepped:Connect(function(deltaTime)
+    -- Ativado apenas segurando o Botão Direito
+    if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+        local target = GetBestTarget()
+        
+        if target and target:FindFirstChild("Head") then
+            local head = target.Head
+            -- Predição ultra-rápida para não perder o alvo em movimento
+            local predictedPosition = head.Position + (head.Velocity * deltaTime)
+            local headPos, onScreen = Camera:WorldToViewportPoint(predictedPosition)
+            
+            if onScreen then
+                local mousePos = UserInputService:GetMouseLocation()
+                -- Puxa a mira diretamente para a cabeça calculada
+                mousemoverel((headPos.X - mousePos.X) * SMOOTHING, (headPos.Y - mousePos.Y) * SMOOTHING)
+            end
+        end
+    end
+end)

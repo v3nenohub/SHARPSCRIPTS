@@ -1,0 +1,220 @@
+local workspaceCharacters = workspace:WaitForChild("Characters")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local activeTracers = {}
+local characterConnections = {}
+local tracerConnections = {}
+local isCleaning = false
+
+local function cleanAll()
+    if isCleaning then return end
+    isCleaning = true
+    
+    for character, line in pairs(activeTracers) do
+        if line then
+            pcall(function() line:Remove() end)
+        end
+        if tracerConnections[character] then
+            pcall(function() tracerConnections[character]:Disconnect() end)
+        end
+        if characterConnections[character] then
+            for _, conn in pairs(characterConnections[character]) do
+                pcall(function() conn:Disconnect() end)
+            end
+        end
+    end
+    
+    table.clear(activeTracers)
+    table.clear(characterConnections)
+    table.clear(tracerConnections)
+    
+    isCleaning = false
+end
+
+local function getTeamColor(targetPlayer)
+    if not targetPlayer or targetPlayer == LocalPlayer then return nil end
+    
+    local localTeam = LocalPlayer.Team
+    local targetTeam = targetPlayer.Team
+    
+    if not localTeam or not targetTeam then
+        return Color3.fromRGB(255, 255, 0)
+    end
+    
+    if localTeam == targetTeam then
+        return Color3.fromRGB(0, 150, 255)
+    else
+        return Color3.fromRGB(255, 0, 0)
+    end
+end
+
+local function isValidCharacter(character)
+    if not character or not character:IsA("Model") then return false end
+    if not character.Parent or character.Parent ~= workspaceCharacters then return false end
+    
+    local player = Players:GetPlayerFromCharacter(character)
+    if not player then return false end
+    if player == LocalPlayer then return false end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return false end
+    
+    return true
+end
+
+local function removeTracer(character)
+    if not character then return end
+    
+    if activeTracers[character] then
+        pcall(function() activeTracers[character]:Remove() end)
+        activeTracers[character] = nil
+    end
+    
+    if tracerConnections[character] then
+        pcall(function() tracerConnections[character]:Disconnect() end)
+        tracerConnections[character] = nil
+    end
+    
+    if characterConnections[character] then
+        for _, conn in pairs(characterConnections[character]) do
+            pcall(function() conn:Disconnect() end)
+        end
+        characterConnections[character] = nil
+    end
+end
+
+local function setupCharacter(character)
+    if not isValidCharacter(character) then return end
+    
+    removeTracer(character)
+    
+    local line = Drawing.new("Line")
+    line.Visible = false
+    line.Thickness = 1
+    line.Transparency = 0.7
+    
+    local player = Players:GetPlayerFromCharacter(character)
+    local color = getTeamColor(player)
+    if not color then
+        line:Remove()
+        return
+    end
+    
+    line.Color = color
+    activeTracers[character] = line
+    
+    local connections = {}
+    
+    if player then
+        table.insert(connections, player:GetPropertyChangedSignal("Team"):Connect(function()
+            if activeTracers[character] then
+                local newColor = getTeamColor(player)
+                if newColor then
+                    activeTracers[character].Color = newColor
+                end
+            end
+        end))
+        table.insert(connections, LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+            if activeTracers[character] then
+                local newColor = getTeamColor(player)
+                if newColor then
+                    activeTracers[character].Color = newColor
+                end
+            end
+        end))
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        table.insert(connections, humanoid.Died:Connect(function()
+            removeTracer(character)
+        end))
+    end
+    
+    table.insert(connections, character.AncestryChanged:Connect(function()
+        if not character or not character.Parent or character.Parent ~= workspaceCharacters then
+            removeTracer(character)
+        end
+    end))
+    
+    characterConnections[character] = connections
+    
+    local connection = RunService.RenderStepped:Connect(function()
+        if not line or not character or character.Parent ~= workspaceCharacters then
+            removeTracer(character)
+            return
+        end
+        
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if not humanoidRootPart then
+            line.Visible = false
+            return
+        end
+        
+        local hrpPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+        
+        if onScreen then
+            line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            line.To = Vector2.new(hrpPos.X, hrpPos.Y)
+            line.Visible = true
+        else
+            line.Visible = false
+        end
+    end)
+    
+    tracerConnections[character] = connection
+end
+
+workspaceCharacters.ChildAdded:Connect(function(child)
+    task.wait(0.5)
+    setupCharacter(child)
+end)
+
+workspaceCharacters.ChildRemoved:Connect(function(child)
+    removeTracer(child)
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    cleanAll()
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            setupCharacter(player.Character)
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    for character, line in pairs(activeTracers) do
+        if not isValidCharacter(character) then
+            removeTracer(character)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(5)
+        cleanAll()
+        
+        for _, char in pairs(workspaceCharacters:GetChildren()) do
+            if isValidCharacter(char) then
+                setupCharacter(char)
+            end
+        end
+    end
+end)
+
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer and player.Character then
+        task.spawn(setupCharacter, player.Character)
+    end
+    player.CharacterAdded:Connect(function(character)
+        task.wait(1)
+        setupCharacter(character)
+    end)
+end
